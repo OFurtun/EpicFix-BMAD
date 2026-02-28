@@ -42,14 +42,26 @@
       "fix_hint": "Use: <h1>{$t('settings.title')}</h1>"
     }
   ],
+    {
+      "id": "F005",
+      "severity": "deferred",
+      "category": "architecture-compliance",
+      "file": "src/lib/entities/components/FieldInput.svelte",
+      "line": 45,
+      "description": "Relation field uses plain dropdown instead of searchable picker — deferred per Decision D5 (Complex entity field UX enhancements deferred)",
+      "evidence": "<select>{#each options as opt}<option>{opt.name}</option>{/each}</select>",
+      "fix_hint": "N/A — tracked deferral, will be addressed when specific epics need richer field UX"
+    }
+  ],
   "summary": {
-    "total": 4,
+    "total": 5,
     "critical": 2,
     "important": 1,
     "minor": 1,
+    "deferred": 1,
     "categories": {
       "test-validity": 1,
-      "architecture-compliance": 1,
+      "architecture-compliance": 2,
       "code-quality": 1,
       "cross-cutting": 1
     }

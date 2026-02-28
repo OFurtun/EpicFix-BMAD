@@ -1,6 +1,6 @@
 ---
 name: epic-fix
-description: "Post-epic quality audit and repair. Deep parallel audit per story, synthesis, user triage, repair story generation, optional Ralph launch."
+description: "Post-epic quality audit and repair. Deep parallel audit per story, synthesis, verification, user triage, repair story generation, optional Ralph launch."
 argument-hint: "[epic-number] [--dry-run] [--skip-ralph]"
 disable-model-invocation: true
 allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
@@ -8,7 +8,7 @@ allowed-tools: Bash, Read, Write, Edit, Glob, Grep, Task
 
 # Epic-Fix: Post-Epic Quality Audit & Repair
 
-You are the orchestrator for the epic-fix pipeline. You run Phases 1-2 (parallel audit + synthesis + triage) directly, then launch `epic-fix.sh` for Phases 3-4 (repair story generation + optional Ralph execution).
+You are the orchestrator for the epic-fix pipeline. You run Phases 1-2.5 (parallel audit + synthesis + verification + triage) directly, then launch `epic-fix.sh` for Phases 3-4 (repair story generation + optional Ralph execution).
 
 **Key design constraint:** Subagent-parallel deep audit, NOT grep patterns. Each subagent loads full architecture shards + story specs + source files for semantic cross-referencing. Context isolation is mandatory.
 
@@ -27,6 +27,7 @@ Read `epic-fix.config` (in this skill directory) for configured paths. It define
 | `STORIES_DIR` | Story files directory |
 | `ARCHITECTURE_DIR` | Architecture documentation directory |
 | `PROJECT_CONTEXT` | Project context/coding standards file |
+| `EPICS_FILE` | Epics/planning file with Decisions Register |
 | `SPRINT_STATUS` | Sprint status YAML file |
 | `RALPH_SKILL_DIR` | Ralph skill directory (for optional chaining) |
 | `RUNTIME_DIR` | Runtime state directory |
@@ -51,8 +52,10 @@ Check these exist. HALT with clear error if missing:
    - Exclude any existing `*-retroactive-quality-fixes.md` files from the audit scope
    - If no story files found: "No story files found for Epic {N}."
 2. **Architecture index**: `{ARCHITECTURE_DIR}/index.md`
-3. **Scripts**: `.claude/skills/epic-fix/scripts/epic-fix.sh` and `audit-prompt.md` and `repair-story-prompt.md`
-4. **Ralph records** (optional): Glob `_ralph/story-{epic}.*-record.md`
+3. **Scripts**: `.claude/skills/epic-fix/scripts/epic-fix.sh` and `audit-prompt.md` and `repair-story-prompt.md` and `verification-prompt.md`
+4. **Epics file** (optional but recommended): `{EPICS_FILE}` — needed for decisions register verification
+   - If missing, warn: "No epics file configured. Deferral-aware audit and verification will be limited."
+5. **Ralph records** (optional): Glob `_ralph/story-{epic}.*-record.md`
    - If missing, warn: "No Ralph records found. Will use git log for file discovery."
 
 ### Step 3: Discover Scope
@@ -120,6 +123,7 @@ For each story, spawn a Task subagent (`subagent_type: "general-purpose"`) with 
    - Each test file path
    - Each architecture shard path
    - Project context file (from config)
+   - Epics file (from config, if configured) — for the Decisions Register
 3. The story key for the findings JSON output
 
 **Batching**: If there are more than 8 stories, batch into groups of 8. Wait for each batch to complete before starting the next.
@@ -134,12 +138,14 @@ You are an audit agent. Follow the instructions in the audit prompt below.
 ## Story to Audit
 Story key: {N.M}
 Story file: {path} — READ THIS FILE
+Ralph record: {RALPH_RECORDS_DIR}/story-{N.M}-record.md — READ THIS FILE (if it exists) for dev agent decisions
 Source files: {paths} — READ EACH FILE
 Test files: {paths} — READ EACH FILE
 Architecture shards: {paths} — READ EACH FILE
 Project context: {PROJECT_CONTEXT} — READ THIS FILE
+Epics & decisions: {EPICS_FILE} — READ THE DECISIONS REGISTER SECTION (search for "## Decisions Register")
 
-Perform all 4 audit checks. Output the JSON findings block.
+Perform all 5 audit checks (including Check 5: Deferral Awareness). Output the JSON findings block.
 ```
 
 As each subagent completes:
@@ -154,8 +160,9 @@ After all subagents complete:
 
 1. **Collect** all findings from all story audits
 2. **Deduplicate** by `file + line + category` — if the same issue is flagged by multiple story audits, keep one finding with all story references
-3. **Group** by severity (critical → important → minor) and category
-4. **Count** totals and present synthesis report:
+3. **Separate** deferred findings (severity = "deferred") from actionable findings
+4. **Group** actionable findings by severity (critical → important → minor) and category
+5. **Count** totals and present synthesis report:
 
 ```
 Epic {N} Audit Synthesis
@@ -173,15 +180,77 @@ Minor ({count}):
   [M1] cross-cutting: {description} — {file}:{line}
   ...
 
-Total: {total} findings ({critical} critical, {important} important, {minor} minor)
+Deferred ({count}) — excluded from repair:
+  [D1] {category}: {description} — {deferral reference}
+  ...
+
+Total: {total} findings ({critical} critical, {important} important, {minor} minor, {deferred} deferred)
 Stories audited: {count} ({failed} audit failures)
 ```
 
 Write the full synthesis to `{RUNTIME_DIR}/FINDINGS.md`.
 
+### Step 6.5: Phase 2.5 — Verification
+
+After synthesis, verify actionable findings against project context. This catches false positives that audit subagents miss despite Check 5.
+
+1. **Read** `.claude/skills/epic-fix/scripts/verification-prompt.md`
+2. **Collect** all story spec file paths (for the verification agent to read deferral sections)
+3. **Collect** key source files referenced by findings (for framework API verification)
+4. **Spawn verification subagents** — batch findings into groups of ~15 per subagent for context efficiency. Each subagent gets:
+
+**Verification subagent prompt template**:
+```
+You are a verification agent. Follow the instructions in the verification prompt below.
+
+## Verification Prompt
+{content of verification-prompt.md}
+
+## Findings to Verify
+{findings batch as formatted text — ID, severity, category, file, description, evidence, fix_hint}
+
+## Files to Read for Verification
+Epics & decisions: {EPICS_FILE} — READ THE DECISIONS REGISTER SECTION
+Story specs: {list of story file paths} — READ "Out of Scope / Deferred" and "Decisions Applied" SECTIONS
+Source files referenced by findings: {list of unique source file paths from findings}
+
+Verify each finding. Output the JSON verifications block.
+```
+
+5. **Parse results** from each verification subagent
+6. **Apply verdicts** to FINDINGS.md:
+   - `confirmed` → keep as-is
+   - `exclude` → move to "Excluded Findings" section with reason
+   - `reclassify` → update description and/or severity
+   - `incorrect` → move to "Excluded Findings" with "incorrect premise" reason
+7. **Update PROGRESS.md** with verification results:
+```
+## Phase 2.5: Verification
+- Findings verified: {total}
+- Confirmed: {count}
+- Excluded: {count}
+- Reclassified: {count}
+- Incorrect: {count}
+```
+8. **Present verification summary** to user before triage:
+```
+Verification Results
+====================
+{count} findings confirmed, {count} excluded, {count} reclassified
+
+Excluded findings:
+  [I4] is_active check — No story specifies user deactivation (V3: cross-story scope)
+  [M14] unbounded cache — MVP-appropriate (V5)
+  ...
+
+Reclassified findings:
+  [C4] Severity unchanged, description updated: "Remove unauthorized migration 00017" (V6)
+  ...
+```
+
 ### Step 7: User Triage
 
-Present findings to the user and ask which to include in the repair story.
+Present verified findings to the user and ask which to include in the repair story.
 
 Use AskUserQuestion with options:
 - **All findings** — Include everything
@@ -193,7 +262,48 @@ If user picks "Custom selection", list each finding by ID and let them specify w
 
 **AC count warning**: If approved findings would likely produce >20 ACs, warn the user.
 
-Write approved findings to `{RUNTIME_DIR}/TRIAGE.md`.
+Write approved findings to `{RUNTIME_DIR}/TRIAGE.md` in this format:
+```markdown
+# Epic {N} — Triaged Findings
+
+Triage level: {all | critical+important | critical | custom} (with verification)
+Approved: {approved_count} of {total}
+Excluded: {excluded_count} (verification + triage)
+Generated: {timestamp}
+
+## Approved Findings
+
+### Critical
+
+{finding entries with full details from FINDINGS.md}
+
+### Important
+
+{finding entries}
+
+### Minor (if included)
+
+{finding entries}
+
+---
+
+## Excluded Findings ({count})
+
+Findings removed during verification or triage. Reasons documented for traceability.
+
+| ID | Reason |
+|----|--------|
+| I4 | **V3: Cross-story scope** — No story specifies user deactivation workflow |
+| M14 | **V5: MVP-appropriate** — Unbounded cache acceptable at current entity type count |
+...
+
+### Reclassifications
+
+| ID | From | To | Reason |
+|----|------|-----|--------|
+| C4 | "Fix the RLS policy" | "Remove unauthorized migration" | V6: No story specifies 00017 |
+...
+```
 
 **Zero findings**: If the audit found zero issues, report "Clean audit — no quality issues found" and exit without creating a repair story.
 
@@ -240,6 +350,9 @@ If a repair story already exists for this epic, increment the story number to av
 
 ### >20 ACs
 Warn during triage. Let user decide whether to proceed, group more aggressively, or split.
+
+### Missing Epics File
+If no epics file is configured, Check 5 (Deferral Awareness) and Phase 2.5 verification will have limited deferral context. Warn the user and proceed — the verification agent will still check story-spec deferrals and cross-story scope.
 
 ## Notes
 

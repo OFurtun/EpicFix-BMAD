@@ -25,19 +25,23 @@ cd /path/to/your/project
 For a completed epic:
 
 1. **Discover** — Find all story files, source files, test files, and relevant architecture shards
-2. **Audit** — Spawn parallel subagents, each performing deep semantic analysis on one story
+2. **Audit** — Spawn parallel subagents, each performing deep semantic analysis on one story (5 checks including deferral awareness)
 3. **Synthesize** — Deduplicate, group, and rank all findings by severity
-4. **Triage** — Present findings to user for approval (critical+important recommended)
-5. **Repair** — Generate a BMAD-format repair story via fresh `claude -p`
-6. **Execute** — Optionally chain into Ralph to implement the fixes
+4. **Verify** — Cross-reference findings against decisions register, story deferrals, and framework APIs to eliminate false positives
+5. **Triage** — Present verified findings to user for approval (critical+important recommended)
+6. **Repair** — Generate a BMAD-format repair story via fresh `claude -p`
+7. **Execute** — Optionally chain into Ralph to implement the fixes
 
 ```
 /epic-fix 2 (Claude Code skill)
     |
-    +-- SKILL.md orchestrator          <- Phases 1-2 (audit + synthesis + triage)
+    +-- SKILL.md orchestrator          <- Phases 1-2.5 (audit + synthesis + verify + triage)
     |   |
-    |   +-- Parallel subagents         <- One per story, deep semantic cross-reference
+    |   +-- Parallel audit subagents   <- One per story, 5 checks incl. deferral awareness
     |   |   (audit-prompt.md)
+    |   |
+    |   +-- Verification subagents     <- Cross-ref findings vs deferrals & framework APIs
+    |   |   (verification-prompt.md)
     |   |
     |   +-- Synthesis + User triage
     |
@@ -74,21 +78,33 @@ For a completed epic:
         |  - Tests   |        |  - Tests   |        |  - Tests   |
         |  - Arch    |        |  - Arch    |        |  - Arch    |
         |            |        |            |        |            |
-        | 4 checks:  |        | 4 checks:  |        | 4 checks:  |
+        | 5 checks:  |        | 5 checks:  |        | 5 checks:  |
         |  Test valid |        |  Test valid |        |  Test valid |
         |  Arch compl |        |  Arch compl |        |  Arch compl |
         |  Code qual  |        |  Code qual  |        |  Code qual  |
         |  Cross-cut  |        |  Cross-cut  |        |  Cross-cut  |
+        |  Deferrals  |        |  Deferrals  |        |  Deferrals  |
         +-----+-----+        +-----+-----+        +-----+-----+
               |                     |                     |
               +---------------------+---------------------+
                                     |
                     +---------------v---------------+
                     |     Phase 2: Synthesis         |
+                    |  Deduplicate + group findings   |
+                    +---------------+---------------+
+                                    |
+                    +---------------v---------------+
+                    |   Phase 2.5: Verification      |
                     |                               |
-                    |  Deduplicate findings          |
-                    |  Group by severity             |
-                    |  Present to user               |
+                    |  Cross-ref vs Decisions Reg.   |
+                    |  Story-spec deferral check     |
+                    |  Framework API verification    |
+                    |  MVP appropriateness filter    |
+                    +---------------+---------------+
+                                    |
+                    +---------------v---------------+
+                    |     User Triage               |
+                    |  Present verified findings     |
                     |  Write TRIAGE.md               |
                     +---------------+---------------+
                                     |
@@ -123,7 +139,7 @@ For a completed epic:
               +-------------------------------------+
 ```
 
-## The 4 Audit Checks
+## The 5 Audit Checks
 
 Each subagent performs these checks against one story's implementation:
 
@@ -133,6 +149,7 @@ Each subagent performs these checks against one story's implementation:
 | **Architecture Compliance** | DDL mismatches, missing RLS, missing triggers, wrong indexes, FK violations | Critical/Important |
 | **Code Quality** | Duplication, hardcoded strings, anti-patterns, dead code, missing error handling | Important |
 | **Cross-Cutting Compliance** | i18n gaps, naming violations, import patterns, responsive design | Minor |
+| **Deferral Awareness** | Cross-references findings against Decisions Register and story deferrals to mark intentional gaps as "deferred" rather than bugs | Deferred |
 
 ## Homer + Ralph + EpicFix Pipeline
 
@@ -172,7 +189,8 @@ your-project/
     |-- epic-fix.config             # Your project-specific configuration
     +-- scripts/
         |-- epic-fix.sh             # Repair story generator (Phase 3-4)
-        |-- audit-prompt.md         # Audit subagent system prompt
+        |-- audit-prompt.md         # Audit subagent system prompt (5 checks)
+        |-- verification-prompt.md  # Verification subagent system prompt (Phase 2.5)
         +-- repair-story-prompt.md  # Repair story generator system prompt
 ```
 
@@ -183,6 +201,7 @@ your-project/
 | Stories directory | `_bmad-output/implementation-artifacts` | `stories` |
 | Architecture docs | `_bmad-output/planning-artifacts/architecture` | `none` |
 | Project context | `_bmad-output/planning-artifacts/project-context.md` | `none` |
+| Epics / Decisions Register | `_bmad-output/planning-artifacts/epics.md` | `none` |
 | Sprint status | `_bmad-output/implementation-artifacts/sprint-status.yaml` | `sprint-status.yaml` |
 | Ralph skill dir | `.claude/skills/ralph` | `.claude/skills/ralph` |
 | Runtime directory | `_epic-fix` | `_epic-fix` |
@@ -210,19 +229,34 @@ bash .claude/skills/epic-fix/scripts/epic-fix.sh --epic 2 --triage _epic-fix/TRI
 ### Phase 1: Parallel Audit
 
 EpicFix spawns one subagent per story (batched in groups of 8). Each subagent:
-- Reads the story spec, all source files, all test files, relevant architecture shards, and project context
-- Performs 4 deep semantic checks (not grep patterns)
-- Outputs structured JSON findings
+- Reads the story spec, all source files, all test files, relevant architecture shards, project context, and decisions register
+- Performs 5 deep semantic checks (not grep patterns), including deferral awareness
+- Outputs structured JSON findings (with `deferred` severity for tracked deferrals)
 
-### Phase 2: Synthesis + Triage
+### Phase 2: Synthesis
 
 The orchestrator:
 - Collects all findings from all subagents
 - Deduplicates by `file + line + category`
+- Separates deferred findings from actionable ones
 - Groups by severity and category
-- Presents the synthesis to the user
+
+### Phase 2.5: Verification
+
+Verification subagents cross-reference each finding against:
+- **Decisions Register** — project-level deferrals (D1-D12+)
+- **Story-spec deferrals** — "Out of Scope" and "Decisions Applied" sections
+- **Cross-story scope** — was this feature actually specified in the story's ACs?
+- **Framework APIs** — reads actual type definitions to verify claims about framework limitations
+- **MVP appropriateness** — filters scale concerns irrelevant at current usage
+
+Each finding gets a verdict: `confirmed`, `excluded`, `reclassified`, or `incorrect`. This eliminates false positives before presenting to the user.
+
+### User Triage
+
+- Presents verified findings to the user
 - User picks: all findings, critical+important (recommended), critical only, or custom selection
-- Approved findings go to `TRIAGE.md`
+- Approved findings go to `TRIAGE.md` with excluded findings documented for traceability
 
 ### Phase 3: Repair Story Generation
 
@@ -259,7 +293,8 @@ EpicFix needs these artifacts to exist in your project:
 
 1. **Story files** — Completed implementation stories in markdown
 2. **Architecture docs** (recommended) — For canonical DDL, RLS, and pattern verification
-3. **Source and test files** — The actual code to audit (discovered from Ralph records or git history)
+3. **Epics/planning file** (recommended) — For Decisions Register (deliberate deferrals). Dramatically reduces false positives.
+4. **Source and test files** — The actual code to audit (discovered from Ralph records or git history)
 
 ## Requirements
 

@@ -96,6 +96,17 @@ else
 fi
 echo ""
 
+echo "── Epics / Decisions Register ───────────────────"
+echo "  A markdown file containing the Decisions Register (deliberate deferrals)."
+echo "  Audit agents and verification agents read this to avoid false positives."
+echo ""
+if [ "$BMAD_DETECTED" = true ]; then
+  EPICS_FILE=$(ask "Epics/planning file with Decisions Register (or 'none')" "_bmad-output/planning-artifacts/epics.md")
+else
+  EPICS_FILE=$(ask "Epics/planning file with Decisions Register (or 'none')" "none")
+fi
+echo ""
+
 echo "── Sprint Status ────────────────────────────────"
 echo "  A YAML file tracking story statuses."
 echo "  Epic-Fix adds repair stories here as ready-for-dev."
@@ -136,6 +147,7 @@ echo "── Installing ──────────────────�
 cp "$INSTALLER_DIR/scripts/epic-fix.sh" "$SKILL_DIR/scripts/epic-fix.sh"
 cp "$INSTALLER_DIR/prompts/audit-prompt.md" "$SKILL_DIR/scripts/audit-prompt.md"
 cp "$INSTALLER_DIR/prompts/repair-story-prompt.md" "$SKILL_DIR/scripts/repair-story-prompt.md"
+cp "$INSTALLER_DIR/prompts/verification-prompt.md" "$SKILL_DIR/scripts/verification-prompt.md"
 cp "$INSTALLER_DIR/skill/SKILL.md" "$SKILL_DIR/SKILL.md"
 chmod +x "$SKILL_DIR/scripts/epic-fix.sh"
 
@@ -143,6 +155,7 @@ echo "  Copied: SKILL.md"
 echo "  Copied: scripts/epic-fix.sh"
 echo "  Copied: scripts/audit-prompt.md"
 echo "  Copied: scripts/repair-story-prompt.md"
+echo "  Copied: scripts/verification-prompt.md"
 
 # ─── Step 5: Write config into the skill directory ───
 cat > "$SKILL_DIR/epic-fix.config" <<CONF
@@ -158,6 +171,9 @@ ARCHITECTURE_DIR="$ARCHITECTURE_DIR"
 
 # Context
 PROJECT_CONTEXT="$PROJECT_CONTEXT"
+
+# Epics / Decisions Register
+EPICS_FILE="$EPICS_FILE"
 
 # Sprint status
 SPRINT_STATUS="$SPRINT_STATUS"
@@ -196,6 +212,7 @@ echo "    $SKILL_DIR/epic-fix.config"
 echo "    $SKILL_DIR/scripts/epic-fix.sh"
 echo "    $SKILL_DIR/scripts/audit-prompt.md"
 echo "    $SKILL_DIR/scripts/repair-story-prompt.md"
+echo "    $SKILL_DIR/scripts/verification-prompt.md"
 echo ""
 echo "  Usage:"
 echo "    cd $TARGET_DIR"

@@ -6,7 +6,7 @@ You are a quality auditor for a completed epic. You have been given a single sto
 
 ## Audit Checks
 
-Perform all 4 checks below. For each finding, produce a structured JSON entry.
+Perform all 5 checks below. For each finding, produce a structured JSON entry.
 
 ### Check 1: Test Behavioral Validity
 
@@ -57,6 +57,32 @@ Check against the cross-cutting patterns from architecture and project-context:
 - **Import patterns**: Using `$lib/` aliases, not relative `../` paths crossing layer boundaries
 - **Soft delete**: Using `is_deleted` flag, not hard DELETE (where applicable)
 
+### Check 5: Deferral Awareness
+
+**Before finalizing any finding**, cross-reference it against known deferrals:
+
+1. **Decisions register**: If an epics/planning file with a Decisions Register was provided in your file list, read it. If a finding matches a documented deferral (D1–D12+), mark it as `severity: "deferred"` instead of critical/important/minor. Include the decision ID in the description.
+
+2. **Story-spec deferrals**: Read the story specification's "Out of Scope / Deferred" and "Decisions Applied" sections. If the story explicitly says something is deferred to a later story/epic, do NOT flag the absence as a finding. Mark as `severity: "deferred"`.
+
+3. **Cross-story scope**: If a feature is missing from the code but the story spec does NOT list it as an AC or task, it is NOT a finding for this story. Only flag things the story was supposed to deliver but didn't, or things the story delivered incorrectly.
+
+4. **Deferral output**: Deferred findings go in the same findings array but with `severity: "deferred"`. Include the deferral reference (e.g., "Decision D5", "Story spec Out of Scope: deferred to Epic 8") in the `description` field.
+
+**Example deferred finding:**
+```json
+{
+  "id": "F008",
+  "severity": "deferred",
+  "category": "architecture-compliance",
+  "file": "src/lib/entities/components/FieldInput.svelte",
+  "line": 45,
+  "description": "Relation field uses plain dropdown instead of searchable picker — deferred per Decision D5 (Complex entity field UX enhancements deferred)",
+  "evidence": "<select>{#each options as opt}<option>{opt.name}</option>{/each}</select>",
+  "fix_hint": "N/A — tracked deferral, will be addressed when specific epics need richer field UX"
+}
+```
+
 ## Output Format
 
 After completing all checks, output your findings as a JSON code block followed by a summary.
@@ -83,6 +109,7 @@ After completing all checks, output your findings as a JSON code block followed 
     "critical": 5,
     "important": 4,
     "minor": 3,
+    "deferred": 2,
     "categories": {
       "test-validity": 5,
       "architecture-compliance": 4,
@@ -100,6 +127,7 @@ After completing all checks, output your findings as a JSON code block followed 
   - `critical` — Fake tests, missing RLS, missing triggers, security issues
   - `important` — DDL mismatches, duplication, missing error handling
   - `minor` — Naming violations, dead code, style issues
+  - `deferred` — Issue matches a documented deferral (Decision D1-D12+, story out-of-scope, or feature assigned to a later epic/story)
 - **category**: One of: `test-validity`, `architecture-compliance`, `code-quality`, `cross-cutting`
 - **file**: Relative path from project root
 - **line**: Line number (approximate is OK, use 0 if not applicable)
@@ -109,14 +137,16 @@ After completing all checks, output your findings as a JSON code block followed 
 
 ## Procedure
 
-1. Read the story specification to understand what was implemented and which files were created/modified
-2. Read ALL source files listed in the story or discovered via the file list
-3. Read ALL test files related to the story's implementation
-4. Read the relevant architecture shards FULLY (not grep)
-5. Read `project-context.md` for coding standards and test behavioral validity rules
-6. Perform all 4 checks systematically
-7. Output the JSON findings block
-8. If you find ZERO issues, output an empty findings array and note "Clean audit" in the summary
+1. Read the story specification to understand what was implemented and which files were created/modified. **Pay special attention** to "Out of Scope / Deferred" and "Decisions Applied" sections.
+2. If a **Decisions Register** file was provided (epics file or similar), read it to understand project-level deferrals
+3. If a **Ralph execution record** was provided (`_ralph/story-N.M-record.md` or similar), read its **Decisions** section to understand what choices the dev agent made and why. This context helps distinguish intentional choices from bugs.
+4. Read ALL source files listed in the story or discovered via the file list
+5. Read ALL test files related to the story's implementation
+6. Read the relevant architecture shards FULLY (not grep)
+7. Read project context file (if provided) for coding standards and test behavioral validity rules
+8. Perform all 5 checks systematically — **Check 5 (Deferral Awareness) should be applied as a filter on Checks 1-4 findings**
+9. Output the JSON findings block
+10. If you find ZERO actionable issues (all findings are deferred), output the deferred findings and note "Clean audit — all issues are tracked deferrals" in the summary
 
 ## Important Rules
 
@@ -125,3 +155,4 @@ After completing all checks, output your findings as a JSON code block followed 
 - **Architecture is ground truth.** When code and architecture disagree, the architecture is correct. Flag the code.
 - **Read full files.** Do not grep for patterns — load and read files completely to understand context before flagging issues.
 - **One finding per issue.** If the same `mapRow` duplication appears in 4 files, that's ONE finding with all 4 files listed, not 4 separate findings.
+- **Respect deferrals.** Do not flag as critical/important something that the project explicitly defers to a later epic. Mark it as deferred instead.
