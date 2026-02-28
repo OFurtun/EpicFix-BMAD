@@ -1,0 +1,57 @@
+{
+  "story_key": "1.3",
+  "findings": [
+    {
+      "id": "F001",
+      "severity": "critical",
+      "category": "test-validity",
+      "file": "tests/unit/components/layout.test.ts",
+      "line": 15,
+      "description": "Unit test uses readFileSync to read source file as string instead of importing and rendering component",
+      "evidence": "import { readFileSync } from 'fs'; const source = readFileSync('src/lib/...', 'utf-8');",
+      "fix_hint": "Replace with @testing-library/svelte render() + screen queries"
+    },
+    {
+      "id": "F002",
+      "severity": "critical",
+      "category": "architecture-compliance",
+      "file": "supabase/migrations/20250101_create_users.sql",
+      "line": 42,
+      "description": "Missing FORCE ROW LEVEL SECURITY on users table",
+      "evidence": "ALTER TABLE users ENABLE ROW LEVEL SECURITY; -- missing FORCE",
+      "fix_hint": "Add: ALTER TABLE users FORCE ROW LEVEL SECURITY;"
+    },
+    {
+      "id": "F003",
+      "severity": "important",
+      "category": "code-quality",
+      "file": "src/lib/components/EntityForm.svelte",
+      "line": 0,
+      "description": "mapRow() helper duplicated in 4 component files",
+      "evidence": "function mapRow(row) { return { ...row, created_at: new Date(row.created_at) } }",
+      "fix_hint": "Extract to shared utility in src/lib/utils/mappers.ts"
+    },
+    {
+      "id": "F004",
+      "severity": "minor",
+      "category": "cross-cutting",
+      "file": "src/routes/(app)/settings/+page.svelte",
+      "line": 23,
+      "description": "Hardcoded string not using i18n translation function",
+      "evidence": "<h1>Settings</h1>",
+      "fix_hint": "Use: <h1>{$t('settings.title')}</h1>"
+    }
+  ],
+  "summary": {
+    "total": 4,
+    "critical": 2,
+    "important": 1,
+    "minor": 1,
+    "categories": {
+      "test-validity": 1,
+      "architecture-compliance": 1,
+      "code-quality": 1,
+      "cross-cutting": 1
+    }
+  }
+}
